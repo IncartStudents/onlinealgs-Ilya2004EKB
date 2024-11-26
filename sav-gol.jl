@@ -1,5 +1,7 @@
 using Random
 using Plots
+using SpecialMatrices
+using LinearAlgebra
 
 mutable struct SavGolFilter{T}
     buf::Vector{T}
@@ -7,10 +9,19 @@ mutable struct SavGolFilter{T}
     need_restart::Bool
     coefs::Vector{Float64}
     function SavGolFilter{T}(window::Int) where T
-        coefs = [-2, 3, 6, 7, 6, 3, -2] ./ 21
+        coefs = vec(calc_coef(window)[1,:])
         new(fill(T(0), window), 1, true, coefs)
     end
 end
+
+function calc_coef(order::Int)
+    z = Int.(collect((1 - order)/2:1:(order - 1)/2))
+    Jp= Vandermonde(z)
+    J = Jp[:, 1:order-1]
+    C = inv((J'*J))*J'
+    return(C)
+end
+        
 
 function exe(obj::SavGolFilter{T}, x::T) where T
     buf, k, coefs= obj.buf, obj.k, obj.coefs
@@ -41,8 +52,8 @@ function signal(len::Float64, f_min::Int, f_max::Int, SNR::Float64)
     f_num = 10
     freqs = [rand(f_min:f_max) for _ in 1:f_num]  
     amps = [rand(0.1:0.1:1.0) for _ in 1:f_num]  
-    # signal = sum(amps[i] .* sin.(2π * freqs[i] .* t) for i in 1:f_num)
-    signal = [(i-50)^3 + (i-50)^2 + 4*(i-50) + 4 for i in 1:length(t)] # полином второй степени
+    signal = sum(amps[i] .* sin.(2π * freqs[i] .* t) for i in 1:f_num)
+    # signal = [(i-50)^3 + (i-50)^2 + 4*(i-50) + 4 for i in 1:length(t)] # полином второй степени
     signal = [(i-50)^2 + 4*(i-50) + 4 for i in 1:length(t)] # полином третей степени
     noise = (1/SNR) .* randn(length(t)) 
     sig_noise = signal + noise
@@ -53,18 +64,17 @@ end
 
 f_min = 1 
 f_max = 100
-SNR = 1.0
+SNR = 0.05
 s_length = 0.1
 fs=1000
 T = 1 / fs  
-window = 7
+window = 11
 latency = window ÷ 2
 
 flt = SavGolFilter{Float64}(window)
 
 t, sig = signal(s_length,f_min,f_max,SNR)
 
-# sig = [64.0, 49.0, 36.0, 25.0, 16.0, 9.0, 4.0, 1.0, 0.0, 1.0, 4.0, 9.0, 16.0, 25.0, 36.0, 49.0, 64.0] # y = xˆ2 + 4x + 4
 out = fill(0.0, size(sig))
 for i in 1:length(sig)
     i=Int64(i)
@@ -75,4 +85,5 @@ for i in 1:length(sig)
     end
 end
 plot(sig, label="Signal", color=:blue, lw=2)
-plot!(out, label="Fltrd", color=:red, lw=1)
+print(calc_coef(5)[1,:])
+plot!(out, label="Fltrd", color=:red, lw=2)
