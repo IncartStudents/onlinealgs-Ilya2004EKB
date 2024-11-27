@@ -22,7 +22,18 @@ function calc_coef(order::Int)
     return(C)
 end
         
-
+function naive(obj::SavGolFilter{T}, signal, window) where T
+    coefs = obj.coefs
+    # coefs = [-3, 12, 17, 12, -3] ./ 35
+    x=signal
+    y=zeros(Float64, length(x))
+    interv=Int((window-1)/2)
+    for k in (interv+1:length(x)-interv)
+        y[k] = sum(coefs .* x[k-interv:k+interv])
+    end
+    return y
+end
+            
 function exe(obj::SavGolFilter{T}, x::T) where T
     buf, k, coefs= obj.buf, obj.k, obj.coefs
     window = length(buf) 
@@ -54,7 +65,7 @@ function signal(len::Float64, f_min::Int, f_max::Int, SNR::Float64)
     amps = [rand(0.1:0.1:1.0) for _ in 1:f_num]  
     signal = sum(amps[i] .* sin.(2π * freqs[i] .* t) for i in 1:f_num)
     # signal = [(i-50)^3 + (i-50)^2 + 4*(i-50) + 4 for i in 1:length(t)] # полином второй степени
-    signal = [(i-50)^2 + 4*(i-50) + 4 for i in 1:length(t)] # полином третей степени
+    signal = [(i-50)^5 + (i-50)^4 - (i-50)^3 + (i-50)^2 + 4*(i-50) + 4 for i in 1:length(t)] # полином пятой степени
     noise = (1/SNR) .* randn(length(t)) 
     sig_noise = signal + noise
     return t, sig_noise
@@ -64,7 +75,7 @@ end
 
 f_min = 1 
 f_max = 100
-SNR = 0.05
+SNR = 0.5
 s_length = 0.1
 fs=1000
 T = 1 / fs  
@@ -84,6 +95,7 @@ for i in 1:length(sig)
         out[i-latency] = y
     end
 end
+out2=naive(flt, sig, window)
 plot(sig, label="Signal", color=:blue, lw=2)
-print(calc_coef(5)[1,:])
-plot!(out, label="Fltrd", color=:red, lw=2)
+plot!(out, label="Fltrd", color=:red, lw=3)
+plot!(out2, label="Fltrd_naive", color=:orange, lw=1)
