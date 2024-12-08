@@ -2,6 +2,7 @@ include("/Users/mac/Documents/GitHub/onlinealgs-Ilya2004EKB/sav-gol.jl")
 using .savgol
 using Plots
 using Statistics
+using JSON3
 
 # https://physionet.org/content/auditory-eeg/1.0.0/Raw_Data/#files-panel ссылка на датасет
 # Recording Tools
@@ -30,22 +31,24 @@ SNR = 30
 filepath = "/Users/mac/Downloads/data/All/all_MX120161018125923"
 start = 100
 len = 200
+
 samples = start:start + len -1 
-
+batch = savgol.batch{Float64}(len)
 name, signal,t = savgol.readbin(filepath, 20, samples) 
+println(batch.data)
 signal = signal .- mean(signal)
-println(t)
-println(length(t))
 window = 9
-latency = window ÷ 2
-
-(obj::savgol.SavGolFilter)(x) = savgol.exe(obj, x)
 
 flt = savgol.SavGolFilter{Float64}(window)
+
+(obj::savgol.SavGolFilter)(x) = savgol.exe(obj, x, batch)
+
 
 # t, sig = signal(s_length,f_min,f_max,SNR)
 out2=savgol.naive(flt, signal, window)
 out = fill(0.0, size(signal))
+
+latency = window ÷ 2
 for i in 1:len
     # String = Vector{Float64}()
     # read!(file_name, String) 
@@ -56,10 +59,12 @@ for i in 1:len
         out[i-latency] = y
     end
 end
-# println(t)
-# println(signal)
+
+data = JSON3.read("data.json")
+out3= vcat(data[latency+1:end], fill(0.0, latency))
+
 plot(t, signal, label="Signal", color=:blue, lw=2)
-plot!(t, out, label="Fltrd", color=:red, lw=2)
+plot!(t, out3, label="Fltrd", color=:red, lw=2)
 plot!(t, out2, label="Fltrd_naive", color=:orange, lw=1)
 
 

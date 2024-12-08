@@ -19,6 +19,16 @@ mutable struct SavGolFilter{T}
     end
 end
 
+mutable struct batch{T}
+    data::Vector{T}   
+    k::Int              
+    marker::Int
+    batch_size::Int     
+    function batch{T}(batch_size::Int) where T
+        new(Vector{T}(), 0, 0, batch_size)
+    end
+end
+
 function readhdr(filepath::AbstractString)
     str = open(filepath, "r") do io 
         len = stat(filepath).size
@@ -41,10 +51,30 @@ function readhdr(filepath::AbstractString)
     return Nch, fs,lsbs, names
 end
 
+function savefile(data)
+    open("data.json", "w") do file
+        JSON3.write(file, data)
+    println("Success")
+end
+
+    
+end
+
+function batch_append(batch::batch{T}, value) where T
+        push!(batch.data, value)
+        batch.k += 1
+        if batch.k == batch.batch_size
+            batch.marker = batch.marker + batch.batch_size
+            savefile(batch.data)
+            batch.data = Vector{T}()
+            batch.k = 0
+        end
+end
+
+
 function readbin(filepath, ch, range::Union{Nothing, UnitRange{Int}} = nothing)
     Nch, fs, lsbs, names = readhdr(filepath * ".hdr")
     offset = (range!== nothing) ? range.start - 1 : 0
-
     elsize = sizeof(Int32) * Nch
     byteoffset = offset * elsize  
     maxlen = (filesize(filepath .* ".bin")-byteoffset) ÷ elsize
@@ -60,10 +90,11 @@ function readbin(filepath, ch, range::Union{Nothing, UnitRange{Int}} = nothing)
     end
     channels = [(data[i, :] .* lsbs[i]) for i in 1:Nch] |> Tuple 
     sig = channels[ch]
-    T=1/fs
+    T =1/fs
     t = range .* T 
     return names[ch], sig, t
 end
+
 
 # function readfile(file_path::AbstractString, ch::Int)
 #     data = CSV.read(file_path, DataFrame; header = 1)
@@ -92,7 +123,7 @@ function naive(obj::SavGolFilter{T}, signal, window) where T
     return y
 end
             
-function exe(obj::SavGolFilter{T}, x::T) where T
+function exe(obj::SavGolFilter{T}, x::T, batch) where T
     buf, k, coefs= obj.buf, obj.k, obj.coefs
     window = length(buf) 
     if obj.need_restart 
@@ -109,10 +140,11 @@ function exe(obj::SavGolFilter{T}, x::T) where T
         buf[i-1]=buf[i]
     end
     obj.k +=1 
+    batch_append(batch, fltrd)
     return fltrd
 end
 
-(obj::SavGolFilter)(x) = exe(obj, x)
+(obj::SavGolFilter)(x) = exe(obj, x, batch)
 
 function pseudo_online(sig,window)
     len = length(sig)
@@ -127,6 +159,5 @@ function pseudo_online(sig,window)
     end
     return out
 end
-
 
 end
