@@ -7,6 +7,8 @@ using Pkg
 using JSON3
 using CSV
 using DataFrames
+using Plots
+using Statistics
 
 mutable struct SavGolFilter{T}
     buf::Vector{T}
@@ -25,7 +27,7 @@ mutable struct batch{T}
     marker::Int
     batch_size::Int     
     function batch{T}(batch_size::Int) where T
-        new(Vector{T}(), 0, 0, batch_size)
+        new(Vector{T}(), 0, 1, batch_size)
     end
 end
 
@@ -51,13 +53,22 @@ function readhdr(filepath::AbstractString)
     return Nch, fs,lsbs, names
 end
 
-function savefile(data)
-    open("data.json", "w") do file
-        JSON3.write(file, data)
-    println("Success")
+function savestate(batch)
+    open("state.json", "w") do file
+        JSON3.write(file, batch)
+    end
+    if (batch.marker / batch.batch_size) % 20 == 0
+        println("Batch N: ", (batch.marker ÷ batch.batch_size), " – SUCCESS!")
+    end
 end
 
-    
+function openstate(len, reset_batch_flag = 0)
+    if reset_batch_flag != 0
+        batch = JSON3.read("state.json", Batch{Float64})
+    else
+        batch = batch{Float64}(len)
+    end
+    return batch
 end
 
 function batch_append(batch::batch{T}, value) where T
@@ -65,7 +76,7 @@ function batch_append(batch::batch{T}, value) where T
         batch.k += 1
         if batch.k == batch.batch_size
             batch.marker = batch.marker + batch.batch_size
-            savefile(batch.data)
+            savestate(batch)
             batch.data = Vector{T}()
             batch.k = 0
         end
@@ -113,7 +124,6 @@ end
         
 function naive(obj::SavGolFilter{T}, signal, window) where T
     coefs = obj.coefs
-    # coefs = [-3, 12, 17, 12, -3] ./ 35
     x=signal
     y=zeros(Float64, length(x))
     interv=Int((window-1)/2)
@@ -131,7 +141,7 @@ function exe(obj::SavGolFilter{T}, x::T, batch) where T
         obj.need_restart = false
     end 
     if k < window
-        buf[obj.k] = x
+        buf[k] = x
     else 
         buf[window] = x 
     end
@@ -146,9 +156,17 @@ end
 
 (obj::SavGolFilter)(x) = exe(obj, x, batch)
 
-function pseudo_online(sig,window)
-    len = length(sig)
-    out = zeros(Float64, len)
+function online(window, batch_len)
+    openstate(batch_len, 0)
+    start = batch.marker
+    batch_len = batch.batch_size
+    samples = start:start + batch_len -1 
+    batch = batch{Float64}(batch_len)
+    name, signal,t = readbin(filepath, channel, samples) 
+    signal = signal .- mean(signal)
+    out = zeros(Float64, batch_len)
+
+    flt = SavGolFilter{Float64}(window)
     latency = window ÷ 2
     for i in 1:len
         x = sig[i]
@@ -158,6 +176,113 @@ function pseudo_online(sig,window)
         end
     end
     return out
+end
+
+function pseudo_online(window, len, sig) 
+    flt = SavGolFilter{Float64}(window)
+    latency = window ÷ 2
+    out = zeros(Float64, len)
+    for i in 1:latency
+        push!(out, 0.0)
+        flt(sig[i])
+    end
+    for i in latency+1:len
+        out[i-latency] = flt(sig[i])
+    end
+    return out
+end
+
+
+function signal_generator(len::Int, f_min::Int, f_max::Int, SNR::Float64)
+    fs = 1000               
+    T = 1/fs               
+    t = collect(0:T:len)
+    f_num = 10
+    freqs = [rand(f_min:f_max) for _ in 1:f_num]  
+    amps = [rand(0.1:0.1:1.0) for _ in 1:f_num]  
+    signal1 = sum(amps[i] .* sin.(2π * freqs[i] .* t) for i in 1:f_num)
+    # signal = [(i-50)^3 + (i-50)^2 + 4*(i-50) + 4 for i in 1:length(t)] # полином второй степени
+    signal2 = [(i-50)^5 + (i-50)^4 - (i-50)^3 + (i-50)^2 + 4*(i-50) + 4 for i in 1:length(t)] # полином пятой степени
+    noise = (1/SNR) .* randn(length(t)) 
+    sig_noise1 = signal1 + noise
+    sig_noise2 = signal2 + noise
+    return t, sig_noise1, sig_noise2
+end
+
+function main(test = 0, batch_len = 200, naive_incl = 0, window = 9)
+    flt = SavGolFilter{Float64}(window)
+
+    if test != 0
+        println("TEST MODE")
+        println("Stage 1. Тестовые сигналы ")
+        len = 300
+        t, sig1, sig2 = signal_generator(len,1,100,10.0)
+        println("-----------------")
+        println()
+        println("сигнал 1. Полином")
+        error = 0
+        out_naive = naive(flt, sig2, window)
+
+        latency = window ÷ 2
+        out_online = fill(0.0, len)
+        error = 0 
+        for i in 1:len
+            x = sig1[i]
+            y = flt(x)
+            if i ≥ window
+                out_online[i-latency] = y
+                accuracy = (out_online[i-latency]/out_naive[i-latency])
+                if abs(accuracy) > 1.05 || abs(accuracy) < 0.95 
+                    error += 1
+                end 
+            end
+        end
+        accuracy_rate = 1 - (error/len)
+        println("Сигнал 1. Точность:  ", accuracy_rate)
+        println()
+        
+        plot(t, sig1, label="Signal", color=:blue, lw=2)
+        plot(t, out_naive, label="naive", color=:red, lw=2)
+        plot!(t, out_online, label="online", color=:orange, lw=1)
+
+        println()
+        println("Сигнал 2. Случайный сигнал")
+
+        flt = SavGolFilter{Float64}(window)
+        error = 0
+        out_naive = naive(flt, sig1, window)
+        out_online = fill(0.0, len)
+        error = 0 
+        for i in 1:len
+            x = sig2[i]
+            y = flt(x)
+            if i ≥ window
+                out_online[i-latency] = y
+                accuracy = (out_online[i-latency]/out_naive[i-latency])
+                if abs(accuracy) > 1.05 || abs(accuracy) < 0.95 
+                    error += 1
+                end 
+            end
+        end
+        accuracy_rate = 1 - (error/len)
+        println("Сигнал 2. Точность:  ", accuracy_rate)
+
+        println("Stage 2. Быстродействие")
+        println("-----------------")
+        println()
+        filepath = "/Users/mac/Downloads/data/All/all_MX120161018125923"
+        start = 1
+        len = 500000
+        channel = 20
+        samples = start:start + len -1 
+        name, signal,t = readbin(filepath, channel, samples) 
+        sig = signal .- mean(signal)
+
+        time_naive = @elapsed naive(flt, sig, window)
+        time_online = @elapsed pseudo_online(window, len, sig)
+        println("Naive : $time_naive seconds")
+        println("online : $time_online seconds")
+    end
 end
 
 end

@@ -18,7 +18,7 @@ file_path = "/Users/mac/Documents/GitHub/onlinealgs-Ilya2004EKB/s01_ex01_s01.txt
 
 file_path = "/Users/mac/Documents/GitHub/onlinealgs-Ilya2004EKB/bidmc_01_Signals.csv"
 file_name = "bidmc_01_Signals.csv"
-channel = 5
+channel = 23
 
 f_min = 1 
 f_max = 100
@@ -34,8 +34,7 @@ len = 200
 
 samples = start:start + len -1 
 batch = savgol.batch{Float64}(len)
-name, signal,t = savgol.readbin(filepath, 20, samples) 
-println(batch.data)
+name, signal,t = savgol.readbin(filepath, channel, samples) 
 signal = signal .- mean(signal)
 window = 9
 
@@ -48,11 +47,9 @@ flt = savgol.SavGolFilter{Float64}(window)
 out2=savgol.naive(flt, signal, window)
 out = fill(0.0, size(signal))
 
+
 latency = window ÷ 2
 for i in 1:len
-    # String = Vector{Float64}()
-    # read!(file_name, String) 
-    # println(String)
     x = signal[i]
     y = flt(x)
     if i ≥ window
@@ -63,11 +60,11 @@ end
 data = JSON3.read("data.json")
 out3= vcat(data[latency+1:end], fill(0.0, latency))
 
-plot(t, signal, label="Signal", color=:blue, lw=2)
-plot!(t, out3, label="Fltrd", color=:red, lw=2)
-plot!(t, out2, label="Fltrd_naive", color=:orange, lw=1)
+savgol.main(1, 200, 0, 9)
 
-
+# plot(t, signal, label="Signal", color=:blue, lw=2)
+# plot!(t, out3, label="Fltrd", color=:red, lw=2)
+# plot!(t, out2, label="Fltrd_naive", color=:orange, lw=1)
 
 
 # time_naive = @elapsed naive(flt, sig, window)
